@@ -1,0 +1,11 @@
+const express=require('express')
+const user_hander=require('../router_hander/user')
+const router=express.Router()
+const path=require('path')
+const multer=require('multer')
+router.get('/login',user_hander.login_hander)
+router.post('/reg',user_hander.reg_hander)
+router.post('/sendmessage',multer({dest:path.join(__dirname,'/..','/image_save')}).single('image'),user_hander.sendmessage_hander)
+router.post('/download_files',user_hander.download_files_hander)
+console.log(__dirname)
+module.exports=router
