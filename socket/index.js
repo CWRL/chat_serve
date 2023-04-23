@@ -2,13 +2,13 @@ const { Server } = require('socket.io')
 const db = require('../db/index')
 const jwt = require('jsonwebtoken')
 const config = require('../config.json')
-const fs=require('fs')
+const fs = require('fs')
 const path = require('path')
 const init_io = (server) => {
     const io = new Server(server, {
         cors: {
             origin: '*',
-            allowedHeaders: ["my-custom-header","token"],
+            allowedHeaders: ["my-custom-header", "token"],
             credentials: true,
         },
         serveClient: false,
@@ -35,27 +35,28 @@ const init_io = (server) => {
     }
     const savemessage = (user, message, socket) => {
         const mysql = 'INSERT INTO message(fromuser,message,time) VALUES(?,?,?)'
-        const time = new Date().getTime()
-        db.run(mysql, [user.ip,JSON.stringify(message), time], (err, rows) => {
+        let time = new Date().getTime()
+        db.run(mysql, [user.ip, JSON.stringify(message), time], (err, rows) => {
             if (err) {
+                console.log(err.message)
                 socket.to(socket.id).emit('savemessage', err.message)
                 return
             }
         })
     }
-    const getmessage = (socket,index) => {
-        const mysql = 'SELECT * FROM message ORDER BY time DESC LIMIT 13 OFFSET ?'
-        db.all(mysql,[index*13], (err, rows) => {
+    const getmessage = (socket, index) => {
+        const mysql = 'SELECT * FROM message ORDER BY time DESC LIMIT 20 OFFSET ?'
+        db.all(mysql, [index * 20], (err, rows) => {
             if (err) {
                 socket.emit('getmessage', err.message)
                 return
             }
-            let valuesmessage= rows.map((item)=>{
-               item.message=JSON.parse(item.message)
-               return item
+            let data = rows.map((item) => {
+                item.message = JSON.parse(item.message)
+                return item
             })
-            valuesmessage.reverse()
-            socket.emit('getmessage',valuesmessage)
+            data.reverse()
+            socket.emit('getmessage', data)
         })
     }
     const loginsuccess = (user, socket) => {
@@ -64,32 +65,115 @@ const init_io = (server) => {
             token: jwt.sign({ ip: user.ip, id: user.id }, config.secret)
         }
         socket.broadcast.emit('system', user, 'join')
-        socket.on('message',(message) => {
-            let ima_name=new Date().getTime()
-            if(message.file.length>0){
-                message.file.forEach((item,index)=>{
-                    const type=item.split('@type:')[1]
-                    const file_path=path.join(__dirname+'/..'+'/image_save/'+ima_name+index+`.${type}`)
-                    if(type==='png' || type==='jpg'){
-                        base64=item.replace(/^data:image\/\w+;base64,/, "").split('@name:')[0]
-                    message.file[index]='http://192.168.10.2:5566/imageSave/'+ima_name+index+`.${type}`+'@name:'+item.split('@name:')[1].split('@type:')[0]+'@data:'+'http://192.168.10.2:5566/imageSave/'+ima_name+index+`.${type}`+'@type:'+type
-                    }
-                    else{
-                        base64=item.split('@data:')[1].split('@type:')[0]
-                        message.file[index]=item.split('@name:')[0]+'@name:'+item.split('@name:')[1].split('@data:')[0]+'@data:'+'http://192.168.10.2:5566/imageSave/'+ima_name+index+`.${type}`+'@type:'+type
-                    }
-                    const file_buffer=new Buffer(base64,'base64')
-                    fs.writeFileSync(file_path,file_buffer)
+        socket.on('allsendsuccess', (arg1, arg2) => {
+            let data = {
+                text: arg2,
+                file: []
+            }
+            if (arg1.length) {
+                let file = arg1.map((item, index) => {
+                    let url = `http://192.168.10.2:5566/imageSave/${item.hash}/${item.name}`
+                    item.url = url
+                    return item
+                })
+                data.file = file
+            }
+            socket.broadcast.emit('sendmessage', data, user)
+            savemessage(user, data, socket)
+        })
+        socket.on('message', (message, callback) => {
+            if (message.curindex === -1) {
+                let { text, time } = message
+                let data = {
+                    message: text,
+                    time
+                }
+                socket.broadcast.emit('sendmessage', data, user)
+                savemessage(user, data, socket)
+            }
+            else {
+                const fs_path = path.join(__dirname, '/..', '/image_save/', message.hash, '/')
+                const file_path = path.join(__dirname, '/..', '/image_save/', message.hash, '/', message.hash + message.curindex)
+                if (!fs.existsSync(fs_path)) {
+                    fs.mkdirSync(fs_path)
+                }
+                try {
+                    fs.writeFileSync(file_path, message.chunk)
+                    callback({
+                        status: 1,
+                        data: '成功'
+                    })
+                } catch (error) {
+                    callback({
+                        status: 0,
+                        data: error.message
+                    })
+                }
+            }
+        })
+        socket.on('merge', (hash, size, name, callback) => {
+            try {
+                const fs_path = path.join(__dirname, '/..', '/image_save/', hash, '/')
+                const file_path = path.join(__dirname, '/../', '/image_save/', hash, name)
+                fs.writeFileSync(file_path, '')
+                for (let i = 1; i <= size; i++) {
+                    let m = fs.readFileSync(fs_path + hash + i)
+                    fs.appendFileSync(file_path, m)
+                    fs.unlinkSync(fs_path + hash + i)
+                }
+                let url = `http://192.168.10.2:5566/imageSave/${hash}/${name}`
+                callback({
+                    status:1,
+                    data:url
+                })
+            } catch (error) {
+                callback({
+                    status:0,
+                    data:error.message
                 })
             }
-            socket.broadcast.emit('sendmessage', message, user)
-            savemessage(user, message, socket)
         })
-        socket.on('getmanymessage',(index)=>{
-            getmessage(socket,index)
+        socket.on('verty',(hash,name,callback)=>{
+            const fs_path = path.join(__dirname, '/..', '/image_save/',hash, '/')
+            if(fs.existsSync(fs_path)){
+               const fs_dir= fs.readdirSync(fs_path)
+               if(fs_dir[0]===name){
+                callback({
+                    status:0,
+                    data:{
+                        message:'文件已上传完',
+                        data:[],
+                        url:`http://192.168.10.2:5566/imageSave/${hash}/${name}`
+                    }
+                })
+               }
+               else{
+                callback({
+                    status:2,
+                    data:{
+                        message:'文件未上传完',
+                        data:fs_dir,
+                        url:''
+                    }
+                })
+               }
+            }
+            else{
+                callback({
+                    status:1,
+                    data:{
+                        message:'没有这个文件',
+                        data:[],
+                        url:''
+                    }
+                })
+            }
         })
-        let m = io.to(socket.id).emit('loginsuccess', data)
-        getmessage(socket,0)
+        socket.on('getmanymessage', (index) => {
+            getmessage(socket, index)
+        })
+        io.to(socket.id).emit('loginsuccess', data)
+        getmessage(socket, 0)
         socket.user = user
     }
     const getOnlineUsers = async () => {
@@ -162,31 +246,31 @@ const init_io = (server) => {
             })
         })
     }
-    const updateuser=(user,ip)=>{
-        const mysql='SELECT * FROM user WHERE user.username=?'
-        db.all(mysql,[ip],(err,rows)=>{
-            if(err){
+    const updateuser = (user, ip) => {
+        const mysql = 'SELECT * FROM user WHERE user.username=?'
+        db.all(mysql, [ip], (err, rows) => {
+            if (err) {
                 console.log(err.message)
             }
-            if(rows.length!==0){
-                ip=ip+'('+(Math.random()*10000+1).toString()+')'
+            if (rows.length !== 0) {
+                ip = ip + '(' + (Math.random() * 10000 + 1).toString() + ')'
             }
-            const mysql='UPDATE user SET username=? WHERE user.username=?'
-            db.run(mysql,[ip,user.ip])
+            const mysql = 'UPDATE user SET username=? WHERE user.username=?'
+            db.run(mysql, [ip, user.ip])
         })
     }
     const login = async (user, socket, isreconnect) => {
         let ip = socket.handshake.address.replace(/::ffff:/, '')
-        if(isreconnect){
-            if(ip!==user.ip){
-                updateuser(user,ip)
+        if (isreconnect) {
+            if (ip !== user.ip) {
+                updateuser(user, ip)
             }
         }
         const headers = socket.handshake.headers
         const realIP = headers['x-forwarded-for'];
         ip = realIP ? realIP : ip;
         const deverseType = shebeixinxi(headers['user-agent'].toLowerCase())
-        user.ip =ip
+        user.ip = ip
         user.deverseType = deverseType
         user.type = 'user'
         if (isreconnect) {
@@ -217,10 +301,10 @@ const init_io = (server) => {
                 decode = null
             }
         }
-        decode={
-            ip:decode?.ip,
+        decode = {
+            ip: decode?.ip,
         }
-        let user = decode? decode:{}
+        let user = decode ? decode : {}
         socket.on('disconnect', (reason) => {
             if (socket.user && socket.user.ip) {
                 socket.emit('loginout', socket.user)

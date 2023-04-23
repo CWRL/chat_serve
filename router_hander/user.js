@@ -86,9 +86,8 @@ const sendmessage_hander=(req,res)=>{
     console.log(req.file)
 }
 const download_files_hander=(req,res)=>{
-    let {file_name,file_type} =req.body
-    
-    fs.access(path.join(__dirname,'/..','/image_save',`/${file_name.replace('http://192.168.10.2:5566/imageSave/','')}`),(err)=>{
+    let {file_hash,file_name,file_path,file_type} =req.body
+    fs.access(path.join(__dirname,'/..','/image_save',`/${file_path.replace('http://192.168.10.2:5566/imageSave/','')}`),(err)=>{
         if(err){
             console.log(err.message)
             res.send({
@@ -98,14 +97,13 @@ const download_files_hander=(req,res)=>{
             return
         }
         // res.download(path.join(__dirname,'/..','/image_save',`/${file_name.replace('http://192.168.10.2:5566/imageSave/','')}`))
-        let vs=fs.createReadStream(path.join(__dirname,'/..','/image_save',`/${file_name.replace('http://192.168.10.2:5566/imageSave/','')}`))
+        let vs=fs.createReadStream(path.join(__dirname,'/..','/image_save',`/${file_path.replace('http://192.168.10.2:5566/imageSave/','')}`))
         res.writeHead(200,{
             "Content-Type": "application/octet-stream",
-            "Content-Disposition": `attachment;filename=${encodeURI(file_name.replace('http://192.168.10.2:5566/imageSave/',''))}`,
+            "Content-Disposition": `attachment;filename=${encodeURI(file_hash+file_name)}`,
             'Cookie':{type:file_type},
             'name':file_type
         })
-        console.log(`${file_name.replace('http://192.168.10.2:5566/imageSave/','')}`)
         vs.pipe(res)
     })
 }
